@@ -1,0 +1,11 @@
+{
+  "title": "SugarTrack",
+  "description": "Registra y controla el consumo diario de azúcar con alimentos comunes en Perú, ayudando a personas en Lima a cuidar su alimentación y prevenir la diabetes.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
