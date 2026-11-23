@@ -10,6 +10,9 @@ type Screen =
   | 'goal'
   | 'quiz'
   | 'coach'
+  | 'settings'
+  | 'subscription'
+  | 'legal'
   | 'home'
   | 'register'
   | 'food-detail'
@@ -29,6 +32,9 @@ type IconName =
   | 'scan'
   | 'camera'
   | 'mail'
+  | 'mic'
+  | 'send'
+  | 'gear'
   | 'lock'
   | 'back'
   | 'check'
@@ -189,6 +195,9 @@ function Icon({ name, size = 22, strokeWidth = 2 }: { name: IconName; size?: num
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
     mail: <><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M4 7.5l8 5.5 8-5.5" /></>,
     lock: <><rect x="5" y="11" width="14" height="9" rx="3" /><path d="M8 11V8a4 4 0 018 0v3" /></>,
+    mic: <><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0014 0M12 18v3" /></>,
+    send: <><path d="M4 12 20 4l-6 16-3-7z" /></>,
+    gear: <><circle cx="12" cy="12" r="3" /><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8" /></>,
     camera: <><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></>,
     scan: <><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M7 12h10" /></>,
     back: <><path d="m15 18-6-6 6-6" /></>,
@@ -580,7 +589,7 @@ const remindOptions: { id: string; emoji: string; label: string }[] = [
   { id: 'no', emoji: '🔕', label: 'No, gracias' },
 ];
 
-function Quiz({ initial, limit, back, done, cta = 'Ir a mi día' }: { initial: Habits; limit: number; back: () => void; done: (h: Habits) => void; cta?: string }) {
+function Quiz({ initial, limit, back, done, cta = 'Ir a mi día' }: { initial: Habits; limit: number; back: () => void; done: (h: Habits, remind: string) => void; cta?: string }) {
   const [step, setStep] = useState(0);
   const [h, setH] = useState<Habits>(initial);
   const [remind, setRemind] = useState('noche');
@@ -660,7 +669,7 @@ function Quiz({ initial, limit, back, done, cta = 'Ir a mi día' }: { initial: H
         {!isPlan ? (
           <Button className={answered ? '' : 'is-off'} onClick={() => setStep(step + 1)}>Siguiente</Button>
         ) : (
-          <Button onClick={() => done(h)}>{cta}</Button>
+          <Button onClick={() => done(h, remind)}>{cta}</Button>
         )}
       </div>
     </main>
@@ -746,15 +755,82 @@ const coachChips: { id: string; label: string }[] = [
   { id: 'limit', label: 'Explícame mi límite' },
 ];
 
-function Coach({ name, habits, sample, total, limit, back }: { name: string; habits: Habits; sample: boolean; total: number; limit: number; back: () => void }) {
+const FREE_QUESTIONS = 3;
+
+type SRResult = { results: ArrayLike<ArrayLike<{ transcript: string }>> };
+type SR = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((e: SRResult) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+const getSR = (): (new () => SR) | null => {
+  const w = window as unknown as { SpeechRecognition?: new () => SR; webkitSpeechRecognition?: new () => SR };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+};
+
+const demoVoiceQuestions = ['¿Cómo voy esta semana?', '¿Cuánta azúcar tiene una Inca Kola?', 'Dame un plan para mañana', '¿Qué cambio primero?'];
+
+function coachAnswer(q: string, first: string, h: Habits, sample: boolean, total: number, limit: number): string[] {
+  const n = norm(q);
+  if (/diabet|enferm|medic|tratamiento|insulina|diagnost|sintoma/.test(n)) {
+    return ['No puedo darte diagnósticos ni indicaciones médicas. Para eso, lo mejor es hablar con tu médico o un nutricionista.', 'Lo que sí puedo hacer es ayudarte a ver cuánta azúcar consumes y cómo reducirla poco a poco.'];
+  }
+  const food = [...foods].sort((a, b) => b.name.length - a.name.length).find((f) => n.includes(norm(f.name)));
+  if (food) {
+    const pct = Math.round((food.sugar / limit) * 100);
+    const lv = foodLevel(food.sugar, limit);
+    if (food.sugar === 0) return [`${food.name} no tiene azúcar. Es una buena opción para ti. 👍`];
+    return [
+      `${food.name} (${food.detail}) tiene ${food.sugar} g de azúcar: el ${pct}% de tu límite diario de ${limit} g, unas ${Math.max(1, Math.round(food.sugar / 4))} cucharaditas.`,
+      lv === 'high' ? 'Es alto en azúcar. Prueba compartirlo o elegir una versión sin azúcar.' : lv === 'warn' ? 'Es una cantidad moderada. Cuídate de no sumar otros dulces el mismo día.' : 'Es una cantidad baja. Puedes incluirlo con tranquilidad.',
+    ];
+  }
+  if (/\b(hola|buenas|hey|buenos)\b/.test(n) && n.length < 18) return [`¡Hola, ${first}! 👋 ¿En qué te ayudo? Pregúntame por tu semana, un alimento, tu límite o un plan para mañana.`];
+  if (/gracias/.test(n)) return ['¡De nada! Aquí estaré cuando me necesites. 💙'];
+  if (/por que|pase|pasa|exced|mas alto|dia mas|fue el mas/.test(n)) return coachReply('why', h, sample, total, limit);
+  if (/plan|manana|que comer|sugier/.test(n)) return coachReply('plan', h, sample, total, limit);
+  if (/cuchar/.test(n)) return [`Una cucharadita equivale a unos 4 g de azúcar. Tu límite de ${limit} g son unas ${Math.round(limit / 4)} cucharaditas al día.`];
+  if (/cambio|primero|reducir|bajar|recomiend|que hago|mejorar|dejar/.test(n)) return coachReply('first', h, sample, total, limit);
+  if (/semana|como voy|promedio|resumen|racha/.test(n)) return coachIntro(first, h, sample, total, limit).slice(1);
+  if (/limite|oms|cuanto puedo|cuanta azucar/.test(n)) return coachReply('limit', h, sample, total, limit);
+  return ['Todavía estoy aprendiendo 😅 Puedo ayudarte con: tu semana, por qué te pasaste, un plan para mañana, cuánta azúcar tiene un alimento o tu límite.'];
+}
+
+function Coach({ name, habits, sample, premium, used, onUse, total, limit, back, goPremium }: {
+  name: string; habits: Habits; sample: boolean; premium: boolean; used: number; onUse: () => void; total: number; limit: number; back: () => void; goPremium: () => void;
+}) {
   const first = name.split(' ')[0] || 'amigo';
   const c = coachData(sample, total, limit);
   const mood: Mood = c.over.length > 0 ? 'worry' : c.logged.length >= 3 ? 'cheer' : 'happy';
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [typing, setTyping] = useState(false);
   const [busy, setBusy] = useState(true);
+  const [draft, setDraft] = useState('');
+  const [listening, setListening] = useState(false);
+  const [note, setNote] = useState('');
+  const [voiceOn, setVoiceOn] = useState(false);
   const timers = useRef<number[]>([]);
   const box = useRef<HTMLDivElement>(null);
+  const rec = useRef<SR | null>(null);
+  const voiceRef = useRef(false);
+  const demoStep = useRef(0);
+  const left = Math.max(0, FREE_QUESTIONS - used);
+  const out = !premium && left === 0;
+
+  voiceRef.current = voiceOn;
+
+  const speak = (text: string) => {
+    if (!voiceRef.current || !('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(text.replace(/[•\n]/g, ' '));
+    u.lang = 'es-ES';
+    u.rate = 1.02;
+    window.speechSynthesis.speak(u);
+  };
 
   const say = (list: string[]) => {
     setBusy(true);
@@ -764,6 +840,7 @@ function Coach({ name, habits, sample, total, limit, back }: { name: string; hab
         window.setTimeout(() => {
           setTyping(false);
           setMsgs((m) => [...m, { from: 'bot', text }]);
+          speak(text);
           if (i === list.length - 1) setBusy(false);
         }, i * 1500 + 950),
       );
@@ -776,6 +853,8 @@ function Coach({ name, habits, sample, total, limit, back }: { name: string; hab
     return () => {
       timers.current.forEach((x) => window.clearTimeout(x));
       timers.current = [];
+      rec.current?.stop();
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     };
   }, []);
 
@@ -784,10 +863,73 @@ function Coach({ name, habits, sample, total, limit, back }: { name: string; hab
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [msgs, typing]);
 
-  const ask = (id: string, label: string) => {
-    if (busy) return;
-    setMsgs((m) => [...m, { from: 'me', text: label }]);
-    say(coachReply(id, habits, sample, total, limit));
+  const send = (text: string) => {
+    const q = text.trim();
+    if (!q || busy || out) return;
+    if (!premium) onUse();
+    setNote('');
+    setDraft('');
+    setMsgs((m) => [...m, { from: 'me', text: q }]);
+    say(coachAnswer(q, first, habits, sample, total, limit));
+  };
+
+  const simulateVoice = (why: string) => {
+    setNote(why);
+    setListening(true);
+    const q = demoVoiceQuestions[demoStep.current % demoVoiceQuestions.length];
+    demoStep.current += 1;
+    timers.current.push(window.setTimeout(() => { setListening(false); send(q); }, 2200));
+  };
+
+  const startVoice = () => {
+    if (busy || out || listening) return;
+    const Ctor = getSR();
+    if (!Ctor) {
+      simulateVoice('Tu navegador no permite usar el micrófono aquí: simulé una pregunta de ejemplo.');
+      return;
+    }
+    try {
+      const r = new Ctor();
+      r.lang = 'es-PE';
+      r.interimResults = true;
+      r.continuous = false;
+      let heard = '';
+      let failed = false;
+      r.onresult = (e) => {
+        let t = '';
+        for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+        heard = t;
+        setDraft(t);
+      };
+      r.onerror = () => {
+        failed = true;
+        setListening(false);
+        simulateVoice('No pude usar el micrófono (permiso o navegador): simulé una pregunta de ejemplo.');
+      };
+      r.onend = () => {
+        setListening(false);
+        if (!failed && heard.trim()) send(heard);
+      };
+      rec.current = r;
+      setNote('');
+      setListening(true);
+      r.start();
+      timers.current.push(window.setTimeout(() => {
+        if (rec.current === r && !heard.trim() && !failed) {
+          failed = true;
+          r.stop();
+          setListening(false);
+          setNote('No te escuché. Revisa el permiso del micrófono o escribe tu pregunta.');
+        }
+      }, 9000));
+    } catch {
+      simulateVoice('No pude usar el micrófono: simulé una pregunta de ejemplo.');
+    }
+  };
+
+  const stopVoice = () => {
+    rec.current?.stop();
+    setListening(false);
   };
 
   return (
@@ -797,6 +939,10 @@ function Coach({ name, habits, sample, total, limit, back }: { name: string; hab
         <div className="co-id">
           <Dulci mood={mood} size={44} />
           <div><strong>Dulci</strong><small><i />Asistente de azúcar · demo</small></div>
+        </div>
+        <div className="co-tools">
+          <button className={`co-voice ${voiceOn ? 'on' : ''}`} onClick={() => { setVoiceOn(!voiceOn); if (voiceOn && 'speechSynthesis' in window) window.speechSynthesis.cancel(); }} aria-pressed={voiceOn} aria-label="Que Dulci hable">{voiceOn ? '🔊' : '🔇'}</button>
+          <span className={`co-count ${out ? 'out' : ''}`}>{premium ? '∞ Premium' : `${left}/${FREE_QUESTIONS} hoy`}</span>
         </div>
       </div>
 
@@ -817,13 +963,271 @@ function Coach({ name, habits, sample, total, limit, back }: { name: string; hab
       </div>
 
       <div className="co-foot">
-        <div className={`co-chips ${busy ? 'off' : ''}`}>
-          {coachChips.map((q) => (
-            <button key={q.id} onClick={() => ask(q.id, q.label)}>{q.label}</button>
-          ))}
-        </div>
+        {out ? (
+          <div className="co-out">
+            <Dulci mood="worry" size={52} />
+            <div>
+              <strong>Llegaste a tus 3 preguntas de hoy</strong>
+              <p>Con Premium, Dulci responde sin límite. Mañana tendrás 3 preguntas más.</p>
+              <button onClick={goPremium}>Ver Premium</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <HScroll className={`co-chips ${busy ? 'off' : ''}`}>
+              {coachChips.map((q) => (
+                <button key={q.id} onClick={() => send(q.label)}>{q.label}</button>
+              ))}
+            </HScroll>
+            <form className="co-input" onSubmit={(e) => { e.preventDefault(); send(draft); }}>
+              {listening ? (
+                <div className="co-listen"><span className="co-wave"><i /><i /><i /><i /><i /></span>Escuchando…</div>
+              ) : (
+                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Escribe tu pregunta…" maxLength={140} disabled={busy} aria-label="Escribe tu pregunta a Dulci" />
+              )}
+              <button type="button" className={`co-mic ${listening ? 'on' : ''}`} onClick={listening ? stopVoice : startVoice} aria-label={listening ? 'Detener' : 'Hablar con Dulci'}><Icon name="mic" size={20} /></button>
+              <button type="submit" className="co-send" disabled={!draft.trim() || busy} aria-label="Enviar"><Icon name="send" size={20} /></button>
+            </form>
+            {note && <p className="co-note">{note}</p>}
+          </>
+        )}
         <small>Análisis automático de tus registros (demo). No reemplaza a un médico ni a un nutricionista.</small>
       </div>
+    </main>
+  );
+}
+
+type Settings = { remind: boolean; remindAt: string; early: boolean };
+const defaultSettings: Settings = { remind: true, remindAt: 'noche', early: false };
+
+function Switch({ on, onChange, label, disabled }: { on: boolean; onChange: () => void; label: string; disabled?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} className={`sw ${on ? 'on' : ''}`} onClick={onChange}>
+      <i />
+    </button>
+  );
+}
+
+type LegalKind = 'terms' | 'privacy' | 'medical';
+
+const legalDocs: Record<LegalKind, { title: ReactNode; sub: string; art: string; sections: [string, string][] }> = {
+  terms: {
+    title: <>Términos y<br /><em>condiciones</em></>,
+    sub: 'Las reglas básicas para usar SugarTrack.',
+    art: 'Pan con palta',
+    sections: [
+      ['1. Qué es SugarTrack', 'SugarTrack es una aplicación de prevención que te ayuda a registrar y entender cuánta azúcar consumes. No es un servicio médico.'],
+      ['2. Uso de la app', 'Debes ser mayor de edad o contar con permiso de un adulto. Te comprometes a dar información verdadera y a no usar la app para fines ilegales.'],
+      ['3. Información referencial', 'El límite diario, el semáforo, las recomendaciones y las respuestas de Dulci son orientativos. No sustituyen la consulta con un médico o nutricionista.'],
+      ['4. Plan Premium', 'Las funciones de Premium y su precio pueden cambiar. La suscripción se renueva hasta que la canceles desde Configuración.'],
+      ['5. Cambios', 'Podemos actualizar estos términos. Si el cambio es importante, te avisaremos dentro de la app.'],
+    ],
+  },
+  privacy: {
+    title: <>Política de<br /><em>privacidad</em></>,
+    sub: 'Cómo cuidamos tus datos.',
+    art: 'Yogur de fresa',
+    sections: [
+      ['Qué datos usamos', 'Tu nombre y correo, tus datos corporales (edad, sexo, peso, talla, cintura, antecedentes), tus hábitos y lo que registras. Son datos de salud, por eso los tratamos con cuidado.'],
+      ['Para qué los usamos', 'Solo para calcular tu límite, mostrarte tu progreso y personalizar los consejos de Dulci. No vendemos tus datos.'],
+      ['Tus derechos', 'Puedes pedir acceder a tus datos, corregirlos o borrarlos en cualquier momento desde Configuración, en "Borrar mis datos".'],
+      ['Consentimiento', 'Los datos de salud se usan solo si nos das tu consentimiento al registrarte.'],
+      ['En este prototipo', 'Esta versión es una demostración: no guarda ni envía tus datos a ningún servidor. Todo vive en la memoria del dispositivo y se borra al cerrar sesión.'],
+    ],
+  },
+  medical: {
+    title: <>Aviso<br /><em>médico</em></>,
+    sub: 'Lo que SugarTrack no es.',
+    art: 'Chicha morada',
+    sections: [
+      ['No es un diagnóstico', 'SugarTrack no diagnostica ni trata ninguna enfermedad, incluida la diabetes.'],
+      ['Consulta a un profesional', 'Si tienes diabetes, prediabetes u otra condición, sigue siempre las indicaciones de tu médico o nutricionista.'],
+      ['Sobre Dulci', 'Dulci es un asistente automático que explica tus registros. Puede equivocarse y no reemplaza la opinión de un profesional de la salud.'],
+      ['Emergencias', 'Si sientes mareo intenso, confusión, sed extrema u otros síntomas preocupantes, busca atención médica de inmediato.'],
+    ],
+  },
+};
+
+function Legal({ kind, back }: { kind: LegalKind; back: () => void }) {
+  const d = legalDocs[kind];
+  return (
+    <main className="screen ah-screen">
+      <AuthHero onBack={back} title={d.title} sub={d.sub} art={d.art} />
+      <div className="content auth-content ah-body">
+        <div className="demo-note">Texto de ejemplo para el prototipo. Debe ser revisado por un asesor legal antes de publicarse.</div>
+        {d.sections.map(([h, p]) => (
+          <section className="lg-sec" key={h}>
+            <h3>{h}</h3>
+            <p>{p}</p>
+          </section>
+        ))}
+      </div>
+    </main>
+  );
+}
+
+function SettingsScreen({ settings, setSettings, premium, back, goSubscription, goPremium, openLegal, deleteData }: {
+  settings: Settings;
+  setSettings: (s: Settings) => void;
+  premium: boolean;
+  back: () => void;
+  goSubscription: () => void;
+  goPremium: () => void;
+  openLegal: (k: LegalKind) => void;
+  deleteData: () => void;
+}) {
+  const [confirm, setConfirm] = useState(false);
+  const times = [
+    ['manana', '🌅 Mañana · 8:00'],
+    ['tarde', '☀️ Tarde · 1:00 p. m.'],
+    ['noche', '🌙 Noche · 8:00 p. m.'],
+  ];
+  return (
+    <main className="screen ah-screen">
+      <AuthHero onBack={back} title={<>Configu<em>ración</em></>} sub="Ajusta SugarTrack a tu manera." art="Inca Kola" />
+      <div className="content auth-content ah-body">
+        <h2 className="st-h">Notificaciones</h2>
+        <div className="st-card">
+          <div className="st-row">
+            <span className="st-ico">⏰</span>
+            <div><strong>Recordatorio diario</strong><small>Te avisamos para registrar tus comidas</small></div>
+            <Switch on={settings.remind} onChange={() => setSettings({ ...settings, remind: !settings.remind })} label="Recordatorio diario" />
+          </div>
+          {settings.remind && (
+            <div className="st-times">
+              {times.map(([id, label]) => (
+                <button key={id} className={settings.remindAt === id ? 'on' : ''} onClick={() => setSettings({ ...settings, remindAt: id })}>{label}</button>
+              ))}
+            </div>
+          )}
+          <div className="st-row">
+            <span className="st-ico">🔔</span>
+            <div><strong>Alerta al 80% de mi límite <em className="st-pro">PREMIUM</em></strong><small>Antes de pasarte, no después</small></div>
+            {premium ? (
+              <Switch on={settings.early} onChange={() => setSettings({ ...settings, early: !settings.early })} label="Alerta temprana" />
+            ) : (
+              <button className="st-lock" onClick={goPremium} aria-label="Desbloquear con Premium">🔒</button>
+            )}
+          </div>
+        </div>
+        <p className="st-note">Demostración: las notificaciones no se envían de verdad.</p>
+
+        <h2 className="st-h">Preferencias</h2>
+        <div className="st-card">
+          <div className="st-row">
+            <span className="st-ico">🌐</span>
+            <div><strong>Idioma</strong><small>Español (Perú)</small></div>
+            <div className="st-seg"><span className="on">ES</span><span className="soon" title="Próximamente">EN</span></div>
+          </div>
+          <div className="st-row">
+            <span className="st-ico">🌙</span>
+            <div><strong>Modo oscuro</strong><small>Próximamente</small></div>
+            <Switch on={false} onChange={() => undefined} label="Modo oscuro" disabled />
+          </div>
+        </div>
+
+        <h2 className="st-h">Cuenta</h2>
+        <div className="st-card">
+          <button className="st-row link" onClick={goSubscription}>
+            <span className="st-ico">✨</span>
+            <div><strong>Mi suscripción</strong><small>{premium ? 'Plan Premium' : 'Plan Gratis'}</small></div>
+            <Icon name="chevron" size={18} />
+          </button>
+        </div>
+
+        <h2 className="st-h">Legal y privacidad</h2>
+        <div className="st-card">
+          {([['terms', '📄', 'Términos y condiciones'], ['privacy', '🔒', 'Política de privacidad'], ['medical', '🩺', 'Aviso médico']] as [LegalKind, string, string][]).map(([k, e, t]) => (
+            <button key={k} className="st-row link" onClick={() => openLegal(k)}>
+              <span className="st-ico">{e}</span>
+              <div><strong>{t}</strong></div>
+              <Icon name="chevron" size={18} />
+            </button>
+          ))}
+          <button className="st-row link danger" onClick={() => setConfirm(true)}>
+            <span className="st-ico">🗑️</span>
+            <div><strong>Borrar mis datos</strong><small>Elimina tu cuenta y tus registros</small></div>
+          </button>
+        </div>
+
+        <h2 className="st-h">Acerca de</h2>
+        <div className="st-card st-about">
+          <p><b>SugarTrack</b> · prototipo v0.9</p>
+          <p>Licencia: por definir por el equipo.</p>
+          <p>Hecho por Jorge, Fabricio, Piero, Jean y Jesús.</p>
+        </div>
+      </div>
+
+      {confirm && (
+        <div className="mn" role="dialog" aria-label="Confirmar borrado" onClick={() => setConfirm(false)}>
+          <div className="mn-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sc-grab" />
+            <h2>¿Borrar tus datos?</h2>
+            <p>Se eliminarán tu perfil, tus hábitos y tus registros, y volverás a la pantalla de inicio. Esta acción no se puede deshacer.</p>
+            <Button className="st-danger" onClick={deleteData}>Sí, borrar todo</Button>
+            <button className="pm-close" onClick={() => setConfirm(false)}>Cancelar</button>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function Subscription({ premium, used, back, goPremium, cancel }: { premium: boolean; used: number; back: () => void; goPremium: () => void; cancel: () => void }) {
+  const [confirm, setConfirm] = useState(false);
+  const left = Math.max(0, FREE_QUESTIONS - used);
+  const items: [string, boolean][] = [
+    ['Registro de alimentos y semáforo', true],
+    ['Historial de 7 días', true],
+    ['Preguntas a Dulci: 3 al día', true],
+    ['Historial y gráficos de todo el año', premium],
+    ['Alertas tempranas al 80% del límite', premium],
+    ['Planes personalizados', premium],
+    ['Dulci sin límite de preguntas', premium],
+  ];
+  return (
+    <main className="screen ah-screen">
+      <AuthHero onBack={back} title={<>Mi<br /><em>suscripción</em></>} sub="Tu plan y lo que incluye." art="Helado" />
+      <div className="content auth-content ah-body">
+        <div className={`sb-plan ${premium ? 'pro' : ''}`}>
+          <span className="sb-badge">{premium ? 'PREMIUM' : 'GRATIS'}</span>
+          <strong>{premium ? 'Plan Premium' : 'Plan Gratis'}</strong>
+          <p>{premium ? 'S/ 12.90 al mes · se renueva cada mes' : 'Sin costo · funciones básicas'}</p>
+          <div className="sb-dulci">
+            <span>💬 Preguntas a Dulci hoy</span>
+            <b>{premium ? 'Ilimitadas' : `${left} de ${FREE_QUESTIONS} disponibles`}</b>
+          </div>
+        </div>
+
+        <h2 className="st-h">Qué incluye</h2>
+        <div className="st-card">
+          {items.map(([t, ok]) => (
+            <div key={t} className={`sb-item ${ok ? 'ok' : ''}`}>
+              <i>{ok ? '✓' : '🔒'}</i>
+              <span>{t}</span>
+            </div>
+          ))}
+        </div>
+
+        {premium ? (
+          <button className="sb-cancel" onClick={() => setConfirm(true)}>Cancelar suscripción</button>
+        ) : (
+          <Button className="pm-cta" onClick={goPremium}>Probar Premium</Button>
+        )}
+        <p className="st-note">Precio y funciones ilustrativos para el prototipo. En la versión real, el pago se gestiona en Google Play o App Store.</p>
+      </div>
+
+      {confirm && (
+        <div className="mn" role="dialog" aria-label="Confirmar cancelación" onClick={() => setConfirm(false)}>
+          <div className="mn-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sc-grab" />
+            <h2>¿Cancelar Premium?</h2>
+            <p>Perderás las alertas tempranas, los planes personalizados y las preguntas ilimitadas a Dulci. Volverás al plan Gratis.</p>
+            <Button className="st-danger" onClick={() => { cancel(); setConfirm(false); }}>Sí, cancelar</Button>
+            <button className="pm-close" onClick={() => setConfirm(false)}>Seguir con Premium</button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -2866,9 +3270,12 @@ function ProgressFull({ profile, total, added, goPremium, goCoach }: { profile: 
     
 
 function ProfileScreen({
-  profile, habits, sample, loadSample, openHabits, premium, openData, openLimit, openHistory, logout,
+  profile, habits, sample, loadSample, openHabits, premium, isPremium, openSettings, openSubscription, openData, openLimit, openHistory, logout,
 }: {
   profile: Profile;
+  isPremium: boolean;
+  openSettings: () => void;
+  openSubscription: () => void;
   habits: Habits;
   sample: boolean;
   loadSample: () => void;
@@ -2887,6 +3294,7 @@ function ProfileScreen({
     { icon: 'user', tone: 'orange', title: 'Mis datos y objetivo', sub: `IMC ${m.bmi.toFixed(1)} · Cintura ${m.wc} cm`, action: openData },
     { icon: 'shield', tone: 'green', title: 'Mi límite diario', sub: `${m.limit} g de azúcar al día`, action: openLimit },
     { icon: 'history', tone: 'blue', title: 'Historial de registros', sub: 'Tus últimos días', action: openHistory },
+    { icon: 'gear', tone: 'green', title: 'Configuración', sub: 'Notificaciones, suscripción y privacidad', action: openSettings },
   ];
 
   return (
@@ -2908,9 +3316,9 @@ function ProfileScreen({
           {demo && <p className="pf-demo">Cifras de ejemplo. Completa tus datos en "Mis datos y objetivo".</p>}
         </div>
 
-        <button className="pf-premium" onClick={premium}>
+        <button className="pf-premium" onClick={isPremium ? openSubscription : premium}>
           <span><Icon name="spark" /></span>
-          <div><small>SUGARTRACK PREMIUM</small><strong>Conoce más sobre tus hábitos</strong></div>
+          <div><small>SUGARTRACK PREMIUM</small><strong>{isPremium ? 'Premium activo · Gestionar' : 'Conoce más sobre tus hábitos'}</strong></div>
           <Icon name="chevron" />
         </button>
 
@@ -2976,6 +3384,7 @@ const premiumRows = [
   ['Gráficos del año', '—', '✓'],
   ['Alertas tempranas', '—', '✓'],
   ['Planes personalizados', '—', '✓'],
+  ['Preguntas a Dulci', '3 al día', 'Ilimitadas'],
   ['Reporte para tu médico', '—', 'Pronto'],
 ];
 
@@ -3036,7 +3445,7 @@ function PreviewPlan() {
   );
 }
 
-function Premium({ back }: { back: () => void }) {
+function Premium({ back, activate }: { back: () => void; activate: () => void }) {
   const [open, setOpen] = useState('alerts');
   const [done, setDone] = useState(false);
   return (
@@ -3094,7 +3503,7 @@ function Premium({ back }: { back: () => void }) {
           </div>
           <span className="pm-trial">7 días gratis</span>
         </div>
-        <Button className="pm-cta" onClick={() => setDone(true)}>Probar Premium gratis</Button>
+        <Button className="pm-cta" onClick={() => { activate(); setDone(true); }}>Probar Premium gratis</Button>
         <p className="pm-note">Precio y funciones ilustrativos para el prototipo. SugarTrack no reemplaza la consulta con un profesional de la salud.</p>
       </div>
 
@@ -3123,7 +3532,13 @@ export default function App() {
   const [habits, setHabits] = useState<Habits>(defaultHabits);
   const [sample, setSample] = useState(false);
   const [quizFrom, setQuizFrom] = useState<'onboarding' | 'profile'>('onboarding');
+  const [premiumOn, setPremiumOn] = useState(false);
+  const [dulciUsed, setDulciUsed] = useState(0);
+  const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const [legalKind, setLegalKind] = useState<LegalKind>('terms');
+  const [subFrom, setSubFrom] = useState<'profile' | 'settings'>('settings');
   const [coachFrom, setCoachFrom] = useState<'home' | 'progress'>('home');
+  const deleteAll = () => { setAdded([]); setSample(false); setHabits(defaultHabits); setProfile(defaultProfile); setOnboarding(true); setPremiumOn(false); setDulciUsed(0); setSettings(defaultSettings); setScreen('welcome'); };
   const loadSample = () => { setSample(true); setHabits((h) => (h.pace ? h : demoHabits)); };
   const limit = limitOf(profile);
   const total = (sample ? BASE_TODAY : 0) + added.reduce((s, a) => s + a.sugar, 0);
@@ -3154,11 +3569,17 @@ export default function App() {
       case 'goal':
         return <Goal initial={profile.goal} back={() => setScreen('indicators')} next={(g) => { setProfile((p) => ({ ...p, goal: g })); setQuizFrom('onboarding'); setScreen('quiz'); }} />;
       case 'quiz':
-        return <Quiz initial={habits} limit={limit} cta={quizFrom === 'profile' ? 'Guardar y volver' : 'Ir a mi día'} back={() => setScreen(quizFrom === 'profile' ? 'profile' : 'goal')} done={(h) => { setHabits(h); if (quizFrom === 'profile') setScreen('profile'); else { setOnboarding(false); setScreen('home'); } }} />;
+        return <Quiz initial={habits} limit={limit} cta={quizFrom === 'profile' ? 'Guardar y volver' : 'Ir a mi día'} back={() => setScreen(quizFrom === 'profile' ? 'profile' : 'goal')} done={(h, r) => { setHabits(h); setSettings((st) => ({ ...st, remind: r !== 'no', remindAt: r === 'no' ? st.remindAt : r })); if (quizFrom === 'profile') setScreen('profile'); else { setOnboarding(false); setScreen('home'); } }} />;
       case 'home':
         return <Home name={profile.name} habits={habits} sample={sample} loadSample={loadSample} total={total} limit={limit} added={added} goRegister={() => setScreen('register')} goProgress={() => setScreen('progress')} goProfile={() => setScreen('profile')} goCoach={() => { setCoachFrom('home'); setScreen('coach'); }} quickAdd={addFood} undo={undoFood} />;
       case 'coach':
-        return <Coach name={profile.name} habits={habits} sample={sample} total={total} limit={limit} back={() => setScreen(coachFrom)} />;
+        return <Coach name={profile.name} habits={habits} sample={sample} premium={premiumOn} used={dulciUsed} onUse={() => setDulciUsed((u) => u + 1)} total={total} limit={limit} back={() => setScreen(coachFrom)} goPremium={() => setScreen('premium')} />;
+      case 'settings':
+        return <SettingsScreen settings={settings} setSettings={setSettings} premium={premiumOn} back={() => setScreen('profile')} goSubscription={() => { setSubFrom('settings'); setScreen('subscription'); }} goPremium={() => setScreen('premium')} openLegal={(k) => { setLegalKind(k); setScreen('legal'); }} deleteData={deleteAll} />;
+      case 'subscription':
+        return <Subscription premium={premiumOn} used={dulciUsed} back={() => setScreen(subFrom)} goPremium={() => setScreen('premium')} cancel={() => { setPremiumOn(false); setSettings((s) => ({ ...s, early: false })); }} />;
+      case 'legal':
+        return <Legal kind={legalKind} back={() => setScreen('settings')} />;
       case 'register':
         return <Register limit={limit} total={total} chooseFood={(f) => { setSelected(f); setScreen('food-detail'); }} quickAdd={addFood} undo={undoFood} />;
       case 'food-detail':
@@ -3193,7 +3614,10 @@ export default function App() {
             openData={() => { setOnboarding(false); setScreen('indicators'); }}
             openLimit={() => setScreen('limit')}
             openHistory={() => setScreen('history')}
-            logout={() => { setAdded([]); setSample(false); setHabits(defaultHabits); setProfile(defaultProfile); setOnboarding(true); setScreen('welcome'); }}
+            logout={deleteAll}
+            isPremium={premiumOn}
+            openSettings={() => setScreen('settings')}
+            openSubscription={() => { setSubFrom('profile'); setScreen('subscription'); }}
           />
         );
       case 'limit':
@@ -3201,7 +3625,7 @@ export default function App() {
       case 'history':
         return <History profile={profile} added={added} sample={sample} back={() => setScreen('profile')} premium={() => setScreen('premium')} />;
       case 'premium':
-        return <Premium back={() => setScreen('profile')} />;
+        return <Premium back={() => setScreen('profile')} activate={() => setPremiumOn(true)} />;
     }
   };
 
