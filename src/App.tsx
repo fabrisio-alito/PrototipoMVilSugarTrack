@@ -9,6 +9,7 @@ type Screen =
   | 'indicators'
   | 'goal'
   | 'quiz'
+  | 'coach'
   | 'home'
   | 'register'
   | 'food-detail'
@@ -349,7 +350,7 @@ function BottomNav({ screen, setScreen }: { screen: Screen; setScreen: (s: Scree
   );
 }
 
-function AuthHero({ onBack, step, title, sub, art, extra }: { onBack: () => void; step?: number; title: ReactNode; sub: string; art: string; extra?: ReactNode }) {
+function AuthHero({ onBack, step, title, sub, art, extra, pet }: { onBack: () => void; step?: number; title: ReactNode; sub: string; art: string; extra?: ReactNode; pet?: boolean }) {
   return (
     <div className="ah">
       <i className="ah-glow g1" />
@@ -367,14 +368,18 @@ function AuthHero({ onBack, step, title, sub, art, extra }: { onBack: () => void
       <h1>{title}</h1>
       <p>{sub}</p>
       {extra}
-      <span className="ah-bub"><FoodArt name={art} emoji="🍬" size={46} still /></span>
+      {pet ? (
+        <span className="ah-pet"><Dulci mood="happy" size={104} wave /></span>
+      ) : (
+        <span className="ah-bub"><FoodArt name={art} emoji="🍬" size={46} still /></span>
+      )}
     </div>
   );
 }
 
 type Mood = 'happy' | 'worry' | 'alert' | 'cheer';
 
-function Dulci({ mood = 'happy', size = 90 }: { mood?: Mood; size?: number }) {
+function Dulci({ mood = 'happy', size = 90, wave = false }: { mood?: Mood; size?: number; wave?: boolean }) {
   const ink = '#14284B';
   return (
     <svg className={`dl dl-${mood}`} width={size} height={size} viewBox="0 0 100 100" role="img" aria-label="Dulci, tu compañero de SugarTrack">
@@ -390,6 +395,12 @@ function Dulci({ mood = 'happy', size = 90 }: { mood?: Mood; size?: number }) {
           <rect x="66" y="4" width="3.6" height="22" rx="1.8" transform="rotate(20 68 15)" fill="#F26A1B" />
           <ellipse cx="75" cy="8" rx="6.5" ry="4.2" transform="rotate(20 75 8)" fill="#FF8A3D" />
         </g>
+        {wave && (
+          <g className="dl-hand">
+            <rect x="84" y="52" width="16" height="7" rx="3.5" fill="#fff" stroke="#BFD0EA" strokeWidth="2" />
+            <circle cx="99" cy="54" r="6.5" fill="#fff" stroke="#BFD0EA" strokeWidth="2" />
+          </g>
+        )}
         <rect x="14" y="20" width="72" height="68" rx="22" fill="url(#dlg)" stroke="#BFD0EA" strokeWidth="2.2" />
         <path d="M25 33 Q50 24 75 33" stroke="#fff" strokeWidth="5" strokeLinecap="round" fill="none" />
         <circle cx="26" cy="78" r="1.8" fill="#BFD0EA" />
@@ -414,14 +425,14 @@ function Dulci({ mood = 'happy', size = 90 }: { mood?: Mood; size?: number }) {
 
         {mood === 'worry' && (
           <g stroke={ink} strokeWidth="2.6" strokeLinecap="round" fill="none">
-            <path d="M31 42 L44 45" />
-            <path d="M69 42 L56 45" />
+            <path d="M31 45 L44 41" />
+            <path d="M69 45 L56 41" />
           </g>
         )}
         {mood === 'alert' && (
           <g stroke={ink} strokeWidth="2.6" strokeLinecap="round" fill="none">
-            <path d="M31 45 L44 42" />
-            <path d="M69 45 L56 42" />
+            <path d="M31 42 L44 45" />
+            <path d="M69 42 L56 45" />
           </g>
         )}
 
@@ -656,6 +667,167 @@ function Quiz({ initial, limit, back, done, cta = 'Ir a mi día' }: { initial: H
   );
 }
 
+type Msg = { from: 'bot' | 'me'; text: string };
+
+const dayLong: Record<string, string> = { Mié: 'miércoles', Jue: 'jueves', Vie: 'viernes', Sáb: 'sábado', Dom: 'domingo', Lun: 'lunes', Mar: 'martes' };
+
+const focusPlan: Record<string, string[]> = {
+  Bebidas: ['Desayuno: café o té sin azúcar (o con media cucharadita).', 'Almuerzo: agua, o una gaseosa sin azúcar, en lugar de la bebida azucarada.', 'Media tarde: una fruta entera en vez de jugo envasado.'],
+  Postres: ['Desayuno: pan con palta o huevo, sin mermelada.', 'Almuerzo: plato de fondo y fruta de postre.', 'Merienda: si quieres un dulce, elige una porción pequeña.'],
+  Golosinas: ['Desayuno: pan con palta o huevo, sin mermelada.', 'Media tarde: frutos secos o fruta en lugar de golosinas.', 'Antes de comprar algo, revisa si trae el octógono "Alto en azúcar".'],
+  Desayuno: ['Desayuno: pan con palta o queso en lugar de mermelada.', 'Almuerzo: agua como bebida principal.', 'Media tarde: una fruta o yogur natural sin azúcar.'],
+  'Café y té': ['Desayuno: reduce media cucharadita de azúcar en tu café o té.', 'Almuerzo: agua como bebida principal.', 'Media tarde: prueba el té o café sin azúcar.'],
+  'Hábitos generales': ['Registra cada cosa dulce que comas hoy.', 'Elige agua como bebida principal.', 'Revisa la etiqueta de dos productos antes de comprarlos.'],
+};
+
+function coachData(sample: boolean, total: number, limit: number) {
+  const days = progressWeeks[0].days.map((d, i) => ({ label: d.label, value: i === 6 ? total : sample ? d.value : 0 }));
+  const logged = days.filter((d) => d.value > 0);
+  const over = logged.filter((d) => d.value > limit);
+  const within = logged.length - over.length;
+  const avg = logged.length ? Math.round(logged.reduce((a, d) => a + d.value, 0) / logged.length) : 0;
+  const worst = logged.reduce((a, d) => (d.value > a.value ? d : a), { label: '', value: 0 });
+  const prevAvg = sample ? Math.round(progressWeeks[1].days.reduce((a, d) => a + d.value, 0) / 7) : 0;
+  return { logged, over, within, avg, worst, prevAvg };
+}
+
+function coachIntro(first: string, h: Habits, sample: boolean, total: number, limit: number): string[] {
+  const c = coachData(sample, total, limit);
+  const focus = focusOf(h);
+  const out = [`¡Hola, ${first}! Soy Dulci 👋 Revisé tus registros y te cuento cómo vamos.`];
+  if (c.logged.length < 3) {
+    out.push(total > 0 ? `Hoy llevas ${total} g de ${limit} g. Todavía tengo pocos días para analizar tu semana.` : 'Todavía tengo pocos datos. Registra lo que comes unos días y te haré un análisis completo.');
+    out.push(h.pace ? `Mientras tanto, para tu enfoque (${focus}): ${focusTip[focus]}` : 'Cuéntame tus hábitos en Perfil y te daré consejos más a tu medida.');
+    return out;
+  }
+  out.push(`Esta semana llevas un promedio de ${c.avg} g al día y tu límite es ${limit} g. Estuviste dentro del límite ${c.within} de ${c.logged.length} días.`);
+  if (c.over.length > 0) {
+    out.push(`Te pasaste ${c.over.length === 1 ? '1 día' : `${c.over.length} días`}: el ${dayLong[c.worst.label]} llegaste a ${c.worst.value} g (${c.worst.value - limit} g de más). No pasa nada: lo importante es ajustar desde hoy.`);
+    const cut = Math.max(5, Math.round(c.avg - limit * 0.8));
+    out.push(`Te recomiendo reducir el azúcar unos ${cut} g al día (${Math.max(1, Math.round(cut / 4)) === 1 ? 'una cucharadita' : `unas ${Math.round(cut / 4)} cucharaditas`}). ${focusTip[focus]}`);
+  } else {
+    out.push('¡Excelente! Todos tus días estuvieron dentro del límite. Sigue con lo que estás haciendo.');
+  }
+  if (c.prevAvg > 0) {
+    const d = c.avg - c.prevAvg;
+    out.push(d < 0 ? `Además, bajaste ${-d} g al día frente a la semana pasada. ¡Buen avance!` : d > 0 ? `Ojo: subiste ${d} g al día frente a la semana pasada.` : 'Tu promedio se mantiene igual que la semana pasada.');
+  }
+  return out;
+}
+
+function coachReply(id: string, h: Habits, sample: boolean, total: number, limit: number): string[] {
+  const c = coachData(sample, total, limit);
+  const focus = focusOf(h);
+  if (id === 'why') {
+    if (c.logged.length === 0) return ['Aún no tengo registros para comparar. Registra lo que comes y te lo explico.'];
+    const day = sample ? historyDays.find((d) => d.total === c.worst.value) : undefined;
+    const head = c.over.length === 0 ? `No te pasaste esta semana 🎉 Tu día más alto fue el ${dayLong[c.worst.label]} con ${c.worst.value} g.` : `El ${dayLong[c.worst.label]} sumaste ${c.worst.value} g, ${c.worst.value - limit} g sobre tu límite.`;
+    if (!day) return [head];
+    const parsed = day.items.map((it) => { const m = it.match(/^(.*) · (\d+) g$/); return m ? { t: m[1], g: Number(m[2]) } : null; }).filter((x): x is { t: string; g: number } => !!x);
+    const top = parsed.reduce((a, b) => (b.g > a.g ? b : a), parsed[0]);
+    return [head, `Ese día comiste: ${day.items.join(', ')}.`, `Lo que más pesó fue ${top.t} (${top.g} g): él solo usó el ${Math.round((top.g / limit) * 100)}% de tu límite.`];
+  }
+  if (id === 'plan') {
+    return [`Este es un plan simple para mañana, con la meta de quedarte por debajo de ${Math.round(limit * 0.85)} g:`, focusPlan[focus].map((l) => `• ${l}`).join('\n'), 'Si lo cumples, tu racha sigue. ¡Tú puedes!'];
+  }
+  if (id === 'first') {
+    const reg = foods.find((f) => f.name === 'Inca Kola');
+    const zero = foods.find((f) => f.name === 'Inca Kola sin azúcar');
+    if (focus === 'Bebidas' && reg && zero) return [`Lo que más te ayudaría es cambiar las bebidas azucaradas. Una Inca Kola tiene ${reg.sugar} g y la versión sin azúcar ${zero.sugar} g: ese solo cambio te ahorra ${reg.sugar - zero.sugar} g.`, 'Empieza por una al día y mira cómo baja tu promedio.'];
+    return [`Para tu enfoque (${focus}), empieza por esto: ${focusTip[focus]}`, 'Un solo cambio, bien sostenido, vale más que muchos a la vez.'];
+  }
+  return [`Tu límite de ${limit} g sale de tu energía diaria: la OMS recomienda que el azúcar libre sea menos del 10% de las calorías, e idealmente menos del 5%. Si tienes factores de riesgo, lo bajamos.`, 'Puedes ver el cálculo paso a paso en Perfil, en "Mi límite diario".'];
+}
+
+const coachChips: { id: string; label: string }[] = [
+  { id: 'why', label: '¿Qué día fue el más alto?' },
+  { id: 'plan', label: 'Dame un plan para mañana' },
+  { id: 'first', label: '¿Qué cambio primero?' },
+  { id: 'limit', label: 'Explícame mi límite' },
+];
+
+function Coach({ name, habits, sample, total, limit, back }: { name: string; habits: Habits; sample: boolean; total: number; limit: number; back: () => void }) {
+  const first = name.split(' ')[0] || 'amigo';
+  const c = coachData(sample, total, limit);
+  const mood: Mood = c.over.length > 0 ? 'worry' : c.logged.length >= 3 ? 'cheer' : 'happy';
+  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [typing, setTyping] = useState(false);
+  const [busy, setBusy] = useState(true);
+  const timers = useRef<number[]>([]);
+  const box = useRef<HTMLDivElement>(null);
+
+  const say = (list: string[]) => {
+    setBusy(true);
+    list.forEach((text, i) => {
+      timers.current.push(window.setTimeout(() => setTyping(true), i * 1500));
+      timers.current.push(
+        window.setTimeout(() => {
+          setTyping(false);
+          setMsgs((m) => [...m, { from: 'bot', text }]);
+          if (i === list.length - 1) setBusy(false);
+        }, i * 1500 + 950),
+      );
+    });
+  };
+
+  useEffect(() => {
+    const t = window.setTimeout(() => say(coachIntro(first, habits, sample, total, limit)), 500);
+    timers.current.push(t);
+    return () => {
+      timers.current.forEach((x) => window.clearTimeout(x));
+      timers.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = box.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [msgs, typing]);
+
+  const ask = (id: string, label: string) => {
+    if (busy) return;
+    setMsgs((m) => [...m, { from: 'me', text: label }]);
+    say(coachReply(id, habits, sample, total, limit));
+  };
+
+  return (
+    <main className="screen co">
+      <div className="co-head">
+        <button className="qz-back" onClick={back} aria-label="Volver"><Icon name="back" size={22} /></button>
+        <div className="co-id">
+          <Dulci mood={mood} size={44} />
+          <div><strong>Dulci</strong><small><i />Asistente de azúcar · demo</small></div>
+        </div>
+      </div>
+
+      <div className="co-chat" ref={box}>
+        <div className="co-hello"><Dulci mood={mood} size={112} wave /></div>
+        {msgs.map((m, i) => (
+          <div key={i} className={`co-row ${m.from}`}>
+            {m.from === 'bot' && <span className="co-av"><Dulci mood="happy" size={32} /></span>}
+            <div className="co-bub">{m.text}</div>
+          </div>
+        ))}
+        {typing && (
+          <div className="co-row bot">
+            <span className="co-av"><Dulci mood="happy" size={32} /></span>
+            <div className="co-bub typing"><i /><i /><i /></div>
+          </div>
+        )}
+      </div>
+
+      <div className="co-foot">
+        <div className={`co-chips ${busy ? 'off' : ''}`}>
+          {coachChips.map((q) => (
+            <button key={q.id} onClick={() => ask(q.id, q.label)}>{q.label}</button>
+          ))}
+        </div>
+        <small>Análisis automático de tus registros (demo). No reemplaza a un médico ni a un nutricionista.</small>
+      </div>
+    </main>
+  );
+}
+
 const wlFoods = ['Yogur de fresa', 'Inca Kola', 'Helado', 'Pan con palta']
   .map((n) => foods.find((f) => f.name === n))
   .filter((f): f is Food => !!f);
@@ -778,7 +950,7 @@ function Login({ back, goSignup, done }: { back: () => void; goSignup: () => voi
 
   return (
     <main className="screen ah-screen">
-      <AuthHero onBack={back} title={<>Qué bueno<br /><em>verte de nuevo</em></>} sub="Ingresa para continuar con tu guía de azúcar." art="Inca Kola" />
+      <AuthHero onBack={back} title={<>Qué bueno<br /><em>verte de nuevo</em></>} sub="Ingresa para continuar con tu guía de azúcar." art="Inca Kola" pet />
       <div className="content auth-content ah-body">
         <TextField icon="mail" label="Correo electrónico" type="email" value={email} onChange={setEmail} placeholder="tucorreo@ejemplo.com" autoComplete="email" error={errors.email} />
         <TextField
@@ -826,7 +998,7 @@ function Signup({ back, goLogin, done }: { back: () => void; goLogin: () => void
 
   return (
     <main className="screen ah-screen">
-      <AuthHero onBack={back} step={1} title={<>Empecemos<br /><em>con tu cuenta</em></>} sub="Con ella guardamos tu historial y tu progreso." art="Yogur de fresa" />
+      <AuthHero onBack={back} step={1} title={<>Empecemos<br /><em>con tu cuenta</em></>} sub="Con ella guardamos tu historial y tu progreso." art="Yogur de fresa" pet />
       <div className="content auth-content ah-body">
         <TextField icon="user" label="Nombre completo" value={name} onChange={setName} placeholder="Ej. Mariana Torres" autoComplete="name" error={errors.name} />
         <TextField icon="mail" label="Correo electrónico" type="email" value={email} onChange={setEmail} placeholder="tucorreo@ejemplo.com" autoComplete="email" error={errors.email} />
@@ -1480,7 +1652,8 @@ function DynamicRing({ items, total, limit, sel, setSel, bump }: {
   );
 }
 
-function Home({ name, habits, sample, loadSample, total, limit, added, goRegister, goProgress, goProfile, quickAdd, undo }: {
+function Home({ name, habits, sample, loadSample, total, limit, added, goRegister, goProgress, goProfile, goCoach, quickAdd, undo }: {
+  goCoach: () => void;
   name: string;
   habits: Habits;
   sample: boolean;
@@ -1560,6 +1733,7 @@ function Home({ name, habits, sample, loadSample, total, limit, added, goRegiste
               </button>
               <p className="mc-say" key={say}>{say}</p>
               {answered && <span className="mc-tag">Tu enfoque: {focusOf(habits)}</span>}
+              <button className="mc-ask" onClick={goCoach}>💬 Hablar con Dulci</button>
             </div>
           </div>
           <div className="mc-days">
@@ -2406,14 +2580,14 @@ function ProgressEmpty({ total, count, goRegister, loadSample }: { total: number
   );
 }
 
-function WeeklyProgress({ profile, total, added, sample, loadSample, goRegister, goPremium }: {
-  profile: Profile; total: number; added: Added[]; sample: boolean; loadSample: () => void; goRegister: () => void; goPremium: () => void;
+function WeeklyProgress({ profile, total, added, sample, loadSample, goRegister, goPremium, goCoach }: {
+  profile: Profile; total: number; added: Added[]; sample: boolean; loadSample: () => void; goRegister: () => void; goPremium: () => void; goCoach: () => void;
 }) {
   if (!sample) return <ProgressEmpty total={total} count={added.length} goRegister={goRegister} loadSample={loadSample} />;
-  return <ProgressFull profile={profile} total={total} added={added} goPremium={goPremium} />;
+  return <ProgressFull profile={profile} total={total} added={added} goPremium={goPremium} goCoach={goCoach} />;
 }
 
-function ProgressFull({ profile, total, added, goPremium }: { profile: Profile; total: number; added: Added[]; goPremium: () => void }) {
+function ProgressFull({ profile, total, added, goPremium, goCoach }: { profile: Profile; total: number; added: Added[]; goPremium: () => void; goCoach: () => void }) {
   const demo = !isComplete(profile);
   const limit = metrics(demo ? { ...profile, ...demoValues } : profile).limit;
 
@@ -2490,6 +2664,12 @@ function ProgressFull({ profile, total, added, goPremium }: { profile: Profile; 
     <main className="screen with-nav">
       <div className="content pg">
         <div className="progress-head"><span>Tu camino saludable</span><h1>Progreso</h1></div>
+
+        <button className="pg-coach" onClick={goCoach}>
+          <Dulci mood="happy" size={54} />
+          <div><strong>Dulci analiza tu semana</strong><small>Te explico cómo vas y qué mejorar</small></div>
+          <Icon name="chevron" size={18} />
+        </button>
 
         <div className="pg-tabs" role="tablist">
           <span className="pg-thumb" style={{ transform: `translateX(${tab === 'week' ? 0 : 100}%)` }} />
@@ -2943,6 +3123,7 @@ export default function App() {
   const [habits, setHabits] = useState<Habits>(defaultHabits);
   const [sample, setSample] = useState(false);
   const [quizFrom, setQuizFrom] = useState<'onboarding' | 'profile'>('onboarding');
+  const [coachFrom, setCoachFrom] = useState<'home' | 'progress'>('home');
   const loadSample = () => { setSample(true); setHabits((h) => (h.pace ? h : demoHabits)); };
   const limit = limitOf(profile);
   const total = (sample ? BASE_TODAY : 0) + added.reduce((s, a) => s + a.sugar, 0);
@@ -2975,7 +3156,9 @@ export default function App() {
       case 'quiz':
         return <Quiz initial={habits} limit={limit} cta={quizFrom === 'profile' ? 'Guardar y volver' : 'Ir a mi día'} back={() => setScreen(quizFrom === 'profile' ? 'profile' : 'goal')} done={(h) => { setHabits(h); if (quizFrom === 'profile') setScreen('profile'); else { setOnboarding(false); setScreen('home'); } }} />;
       case 'home':
-        return <Home name={profile.name} habits={habits} sample={sample} loadSample={loadSample} total={total} limit={limit} added={added} goRegister={() => setScreen('register')} goProgress={() => setScreen('progress')} goProfile={() => setScreen('profile')} quickAdd={addFood} undo={undoFood} />;
+        return <Home name={profile.name} habits={habits} sample={sample} loadSample={loadSample} total={total} limit={limit} added={added} goRegister={() => setScreen('register')} goProgress={() => setScreen('progress')} goProfile={() => setScreen('profile')} goCoach={() => { setCoachFrom('home'); setScreen('coach'); }} quickAdd={addFood} undo={undoFood} />;
+      case 'coach':
+        return <Coach name={profile.name} habits={habits} sample={sample} total={total} limit={limit} back={() => setScreen(coachFrom)} />;
       case 'register':
         return <Register limit={limit} total={total} chooseFood={(f) => { setSelected(f); setScreen('food-detail'); }} quickAdd={addFood} undo={undoFood} />;
       case 'food-detail':
@@ -2997,7 +3180,7 @@ export default function App() {
       case 'alert':
         return <ExcessAlert total={total} limit={limit} last={added[added.length - 1]} home={() => setScreen('home')} alternative={() => setScreen('register')} undoLast={() => { const l = added[added.length - 1]; if (l) undoFood(l.id); setScreen('home'); }} />;
       case 'progress':
-        return <WeeklyProgress profile={profile} total={total} added={added} sample={sample} loadSample={loadSample} goRegister={() => setScreen('register')} goPremium={() => setScreen('premium')} />;
+        return <WeeklyProgress profile={profile} total={total} added={added} sample={sample} loadSample={loadSample} goRegister={() => setScreen('register')} goPremium={() => setScreen('premium')} goCoach={() => { setCoachFrom('progress'); setScreen('coach'); }} />;
       case 'profile':
         return (
           <ProfileScreen
