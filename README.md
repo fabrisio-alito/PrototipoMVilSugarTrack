@@ -115,7 +115,7 @@ Este es un **prototipo**. Para ser transparentes:
 
 ## 👥 Equipo
 
-Proyecto desarrollado por **Jorge, Fabricio, Piero, Jean y Jesús**.
+Proyecto desarrollado por **Fabrisio**.
 
 <!-- Puedes agregar aquí el curso, la universidad y el nombre del profesor -->
 
